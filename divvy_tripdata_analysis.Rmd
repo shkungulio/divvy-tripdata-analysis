@@ -1,0 +1,264 @@
+---
+title: "Divvy Tripdata Analysis"
+output:
+  html_document:
+    theme:
+      bg: "#101010"
+      fg: "#FDF7F7" 
+      primary: "#3A97D3"
+      base_font:
+        google: Montserrat
+      code_font:
+        google: JetBrains Mono
+    highlight: espresso
+    code-download: yes
+    css: "resources/styles.css"
+    toc: true
+    toc_depth: 4
+    toc_float:
+      collapsed: true
+      smooth_scroll: false
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE,
+                      fig.width = 10, fig.height = 6
+                      )
+
+#Install the following libraries if required
+if(!requireNamespace("tidyverse", quietly = TRUE)){
+  # If not installed, then install it
+  install.packages("tidyverse")
+}
+if(!requireNamespace("skimr", quietly = TRUE)){
+  # If not installed, then install it
+  install.packages("skimr")
+}
+if(!requireNamespace("ini", quietly = TRUE)){
+  # If not installed, then install it
+  install.packages("ini")
+}
+if(!requireNamespace("RPostgres", quietly = TRUE)){
+  # If not installed, then install it
+  install.packages("RPostgres")
+}
+if(!requireNamespace("dotenv", quietly = TRUE)){
+  # If not installed, then install it
+  install.packages("dotenv")
+}
+if(!requireNamespace("glue", quietly = TRUE)){
+  # If not installed, then install it
+  install.packages("glue")
+}
+
+# Install necessary libraries
+library(dotenv)
+library(RPostgres)
+library(ini)
+library(tidyverse)
+library(skimr)
+library(glue)
+library(readr)
+library(glue)
+```
+
+
+<br>
+
+## Business Understanding
+### Business Objectives
+Divvy, a bike-sharing service, provides ride data across different user groups (members vs. casual riders) and time periods. Understanding usage patterns, ride behaviors, and station demand is critical for optimizing operations, improving customer experience, and informing marketing strategies.
+
+Although Divvy collects large amounts of trip data, it is not yet fully clear how user type, ride duration, and temporal patterns (day, hour, season) interact to influence ridership. Additionally, little is known about which stations are most popular and how these trends shift across months and seasons.
+
+### Problem Statement
+How do ride behaviors differ between casual and member users across time (daily, weekly, seasonal) and space (stations/routes), and what patterns can be identified in ride duration, station popularity, and demand trends that could inform Divvy’s operational and marketing strategies? 
+
+<br>
+
+## Data Understanding
+### Data Collection
+
+
+
+
+### Data Description
+#### Data structure
+```{r}
+str(penguins)
+```
+#### Basic summary
+```{r}
+skim(penguins)
+```
+#### Statistical summary
+```{r}
+summary(penguins)
+```
+
+Lorem ipsum dolor sit amet, consectetur adipiscing elit. In faucibus sagittis auctor. Cras sed tincidunt lorem. Nam at rhoncus augue, ut ultrices purus. Nullam commodo ullamcorper sem quis accumsan. Nam sed est in justo vestibulum euismod eget viverra eros. Donec non lobortis turpis. Vestibulum ac odio vitae lacus pharetra egestas ut in ipsum. Nunc blandit massa odio, eu tristique mauris tempor a. Donec dignissim enim sit amet ullamcorper convallis.
+
+### Data Dictionary
+
+| **Attributes** | **Data Types** | **Descriptions** | **Constraints** |
+|:---------------|:---------------|:-----------------|:----------------|
+| `species`      | Two.           | Three.           | Four.           |
+| `island`       | Six.           | Seven.           | Eight.          |
+| `bill_len`     | Ten.           | Eleven.          | Twelve.         |
+| `bill_dep`     | Ten.           | Eleven.          | Twelve.         |
+| `flipper_len`  | Ten.           | Eleven.          | Twelve.         |
+| `body_mass`    | Ten.           | Eleven.          | Twelve.         |
+| `sex`          | Ten.           | Eleven.          | Twelve.         |
+| `year`         | Ten.           | Eleven.          | Twelve.         |
+
+Nam at rhoncus augue, ut ultrices purus. Nullam commodo ullamcorper sem quis accumsan. Nam sed est in justo vestibulum euismod eget viverra eros. Donec non lobortis turpis. Vestibulum ac odio vitae lacus pharetra egestas ut in ipsum. Nunc blandit massa odio, eu tristique mauris tempor a. Donec dignissim enim sit amet ullamcorper convallis.
+
+
+<br>
+
+## Data Preparation
+
+### Database & Schema Setup
+#### Set database connections
+Create a connection to the PostgreSQL database
+```{r connections, message=FALSE}
+# Read config
+config <- read.ini("resources/db_config.ini")
+db <- config$postgresql
+
+# Safe database connection
+tryCatch({
+  con <- dbConnect(
+    Postgres(),
+    host = db$host,
+    dbname = db$database,
+    user = db$user,
+    password = db$password,
+    port = as.integer(db$port)
+  )
+}, error = function(e) {
+  stop("Database connection failed: ", e$message)
+})
+```
+
+#### Create schema and table
+Create schema **divvy** and single partitioned table
+```{r create_schema, message=FALSE}
+# Ensure schema exists
+dbExecute(con, "CREATE SCHEMA IF NOT EXISTS divvy;")
+
+# Create one big trips table
+dbExecute(con, "
+  CREATE TABLE IF NOT EXISTS divvy.trips (
+    ride_id             TEXT PRIMARY KEY,
+    rideable_type       TEXT,
+    started_at          TIMESTAMP,
+    ended_at            TIMESTAMP,
+    start_station_name  TEXT,
+    start_station_id    TEXT,
+    end_station_name    TEXT,
+    end_station_id      TEXT,
+    start_lat           NUMERIC,
+    start_lng           NUMERIC,
+    end_lat             NUMERIC,
+    end_lng             NUMERIC,
+    member_casual       TEXT,
+    trip_month          TEXT   -- extra column for month tracking
+  );
+")
+```
+
+### Import Data
+Load all 12 monthly CSVs into `divvy.trips`
+```{r import-data, message=FALSE}
+# Define months and year
+months <- sprintf("%02d", 1:12)
+year <- "2024"
+
+for (m in months) {
+  file_path <- paste0("resources/data/", year, m, "-divvy-tripdata.csv")
+  month_name <- tolower(format(as.Date(paste(year, m, "01", sep = "-")), "%B"))
+  
+  tryCatch({
+    # Read CSV
+    df <- read_csv(file_path, show_col_types = FALSE)
+    
+    # Add trip_month column
+    df$trip_month <- month_name
+    
+    # Append data directly with deduplication via ON CONFLICT
+    dbWriteTable(
+      con,
+      Id(schema = "divvy", table = "trips"),
+      df,
+      append = TRUE,
+      row.names = FALSE
+    )
+    
+    # Add unique constraint if not already there (only runs once)
+    dbExecute(con, "
+      ALTER TABLE divvy.trips
+      ADD CONSTRAINT IF NOT EXISTS trips_ride_id_unique UNIQUE (ride_id);
+    ")
+    
+    message(paste(month_name, "data loaded successfully."))
+    
+  }, error = function(e) {
+    message(paste("Error with", month_name, ":", e$message))
+  })
+}
+```
+
+### Create a Master View
+Combine all trips into a dynamic view
+```{r combine-tables}
+dbExecute(con, "
+  CREATE OR REPLACE VIEW divvy.all_trips AS
+  SELECT * FROM divvy.trips;
+")
+```
+
+### Exploratory Data Analysis
+ 
+```{r}
+dbGetQuery(con, "
+            SELECT *
+            FROM divvy.trips
+            WHERE trip_month = 'december'
+            LIMIT 20;
+          ")
+```
+
+Lorem ipsum dolor sit amet, consectetur adipiscing elit. In faucibus sagittis auctor. Cras sed tincidunt lorem. Nam at rhoncus augue, ut ultrices purus. Nullam commodo ullamcorper sem quis accumsan. Nam sed est in justo vestibulum euismod eget viverra eros. Donec non lobortis turpis. Vestibulum ac odio vitae lacus pharetra egestas ut in ipsum. Nunc blandit massa odio, eu tristique mauris tempor a. Donec dignissim enim sit amet ullamcorper convallis.
+
+Proin eget aliquam urna. In a vulputate orci, non ornare mauris. Maecenas sed nunc vel arcu feugiat viverra non id ligula. Vestibulum viverra metus ut ligula porttitor, a interdum ante elementum. Nulla facilisi. Nulla facilisi. Suspendisse sagittis cursus ante, ac pretium lorem volutpat vitae. Ut eu lacus in nulla sollicitudin tincidunt. Aliquam erat volutpat. Nullam sed mi lobortis, viverra metus vel, pellentesque mi. Sed eu magna pharetra, sodales erat in, maximus nisi. Sed gravida venenatis odio elementum condimentum. Suspendisse eget pulvinar nisl, ut interdum dui. Suspendisse dapibus nibh maximus, laoreet eros ac, accumsan elit. Ut finibus, elit eu sodales imperdiet, ligula nisl malesuada est, quis hendrerit mi enim nec est.
+
+
+<br>
+
+## Modeling
+Lorem ipsum dolor sit amet, consectetur adipiscing elit. In faucibus sagittis auctor. Cras sed tincidunt lorem. Nam at rhoncus augue, ut ultrices purus. Nullam commodo ullamcorper sem quis accumsan. Nam sed est in justo vestibulum euismod eget viverra eros. Donec non lobortis turpis. Vestibulum ac odio vitae lacus pharetra egestas ut in ipsum. Nunc blandit massa odio, eu tristique mauris tempor a. Donec dignissim enim sit amet ullamcorper convallis.
+
+Proin eget aliquam urna. In a vulputate orci, non ornare mauris. Maecenas sed nunc vel arcu feugiat viverra non id ligula. Vestibulum viverra metus ut ligula porttitor, a interdum ante elementum. Nulla facilisi. Nulla facilisi. Suspendisse sagittis cursus ante, ac pretium lorem volutpat vitae. Ut eu lacus in nulla sollicitudin tincidunt. Aliquam erat volutpat. Nullam sed mi lobortis, viverra metus vel, pellentesque mi. Sed eu magna pharetra, sodales erat in, maximus nisi. Sed gravida venenatis odio elementum condimentum. Suspendisse eget pulvinar nisl, ut interdum dui. Suspendisse dapibus nibh maximus, laoreet eros ac, accumsan elit. Ut finibus, elit eu sodales imperdiet, ligula nisl malesuada est, quis hendrerit mi enim nec est.
+
+
+<br>
+
+## Evaluation
+Lorem ipsum dolor sit amet, consectetur adipiscing elit. In faucibus sagittis auctor. Cras sed tincidunt lorem. Nam at rhoncus augue, ut ultrices purus. Nullam commodo ullamcorper sem quis accumsan. Nam sed est in justo vestibulum euismod eget viverra eros. Donec non lobortis turpis. Vestibulum ac odio vitae lacus pharetra egestas ut in ipsum. Nunc blandit massa odio, eu tristique mauris tempor a. Donec dignissim enim sit amet ullamcorper convallis.
+
+Proin eget aliquam urna. In a vulputate orci, non ornare mauris. Maecenas sed nunc vel arcu feugiat viverra non id ligula. Vestibulum viverra metus ut ligula porttitor, a interdum ante elementum. Nulla facilisi. Nulla facilisi. Suspendisse sagittis cursus ante, ac pretium lorem volutpat vitae. Ut eu lacus in nulla sollicitudin tincidunt. Aliquam erat volutpat. Nullam sed mi lobortis, viverra metus vel, pellentesque mi. Sed eu magna pharetra, sodales erat in, maximus nisi. Sed gravida venenatis odio elementum condimentum. Suspendisse eget pulvinar nisl, ut interdum dui. Suspendisse dapibus nibh maximus, laoreet eros ac, accumsan elit. Ut finibus, elit eu sodales imperdiet, ligula nisl malesuada est, quis hendrerit mi enim nec est.
+
+
+<br>
+
+## Deployment
+Nullam commodo ullamcorper sem quis accumsan. Nam sed est in justo vestibulum euismod eget viverra eros. Donec non lobortis turpis. Vestibulum ac odio vitae lacus pharetra egestas ut in ipsum. Nunc blandit massa odio, eu tristique mauris tempor a. Donec dignissim enim sit amet ullamcorper convallis.
+
+
+
+
+
+```{r disconnect, include=FALSE}
+dbDisconnect(con)
+```
