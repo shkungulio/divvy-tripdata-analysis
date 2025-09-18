@@ -1,6 +1,5 @@
 Divvy Tripdata Database
 ================
-Seif Kungulio
 
 ## Introduction
 

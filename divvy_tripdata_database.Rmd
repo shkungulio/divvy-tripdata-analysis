@@ -1,8 +1,22 @@
 ---
 title: "Divvy Tripdata Database"
-author: "Seif Kungulio"
 output: 
-  github_document
+  html_document:
+    theme:
+      bg: "#101010"
+      fg: "#FDF7F7" 
+      primary: "#3A97D3"
+      base_font:
+        google: Montserrat
+      code_font:
+        google: JetBrains Mono
+    highlight: espresso
+    css: "resources/styles.css"
+    toc: true
+    toc_depth: 4
+    toc_float:
+      collapsed: true
+      smooth_scroll: false
 ---
 
 ```{r setup, include=FALSE}
@@ -26,6 +40,8 @@ if(!requireNamespace("ini", quietly = TRUE)){
 library(RPostgres)
 library(DBI)
 library(ini)
+library(readr)
+library(glue)
 ```
 
 ## Introduction
@@ -55,20 +71,243 @@ tryCatch({
   stop("Database connection failed: ", e$message)
 })
 
+# Register connection for SQL chunks
 knitr::opts_chunk$set(connection = con)
 ```
 
 ### Database schema
 Create database schema to the database
-```{sql}
+```{sql create_schema}
 CREATE SCHEMA IF NOT EXISTS divvy;
 ```
 
-### Databse tables
+### Database tables
+Read data into R environment
+```{r read_data}
+# Define year and months
+year <- "2024"
+months <- sprintf("%02d", 1:12)
+
+# Initialize list to store data
+divvy_data <- list()
+
+# Loop through months and read each file
+for (m in months) {
+  file_path <- paste0("resources/data/", year, m, "-divvy-tripdata.csv")
+  month_name <- tolower(format(as.Date(paste0(year, "-", m, "-01")), "%B"))
+  
+  divvy_data[[month_name]] <- read_csv(file_path, show_col_types = FALSE)
+}
+```
+
+Drop tables if already exists
+```{r drop_monthly_tables, message=FALSE}
+# Define all month names
+months <- tolower(month.name)
+
+for (m in months) {
+  sql <- glue::glue("DROP TABLE IF EXISTS divvy.{m};")
+  DBI::dbExecute(con, sql)
+}
+```
+
+#### January table
+Create and load data for the month of January
+```{r january_table, message=FALSE}
+# Create table
+create_jan_table <- "
+  CREATE TABLE divvy.january (
+      ride_id             TEXT PRIMARY KEY,
+      rideable_type       TEXT,
+      started_at          TIMESTAMP,
+      ended_at            TIMESTAMP,
+      start_station_name  TEXT,
+      start_station_id    TEXT,
+      end_station_name    TEXT,
+      end_station_id      TEXT,
+      member_casual       TEXT
+  );
+"
+DBI::dbExecute(con, create_jan_table)
+
+# Write to PostgreSQL (replaces table if exists)
+dbWriteTable(
+  conn      = con,
+  name      = DBI::Id(schema = "divvy", table = "january"),
+  value     = divvy_data$january,
+  overwrite = TRUE,   # drop & recreate table
+  row.names = FALSE
+)
+```
+
+#### February table
+Create and load data for the month of February
+```{r february_table, message=FALSE}
+# Create table
+create_feb_table <- "
+  CREATE TABLE divvy.february (
+      ride_id             TEXT PRIMARY KEY,
+      rideable_type       TEXT,
+      started_at          TIMESTAMP,
+      ended_at            TIMESTAMP,
+      start_station_name  TEXT,
+      start_station_id    TEXT,
+      end_station_name    TEXT,
+      end_station_id      TEXT,
+      member_casual       TEXT
+  );
+"
+DBI::dbExecute(con, create_feb_table)
+
+# Write to PostgreSQL (replaces table if exists)
+dbWriteTable(
+  conn      = con,
+  name      = DBI::Id(schema = "divvy", table = "february"),
+  value     = divvy_data$february,
+  overwrite = TRUE,   # drop & recreate table
+  row.names = FALSE
+)
+```
+
+#### March table
+Create and load data for the month of January
+```{r january_table, message=FALSE}
+# Create table
+create_jan_table <- "
+  CREATE TABLE divvy.january (
+      ride_id             TEXT PRIMARY KEY,
+      rideable_type       TEXT,
+      started_at          TIMESTAMP,
+      ended_at            TIMESTAMP,
+      start_station_name  TEXT,
+      start_station_id    TEXT,
+      end_station_name    TEXT,
+      end_station_id      TEXT,
+      member_casual       TEXT
+  );
+"
+DBI::dbExecute(con, create_jan_table)
+
+# Write to PostgreSQL (replaces table if exists)
+dbWriteTable(
+  conn      = con,
+  name      = DBI::Id(schema = "divvy", table = "january"),
+  value     = divvy_data$january,
+  overwrite = TRUE,   # drop & recreate table
+  row.names = FALSE
+)
+```
+
+#### April table
+Create and load data for the month of April
+```{r apr_table, message=FALSE}
+# Create table
+create_apr_table <- "
+  CREATE TABLE divvy.april (
+      ride_id             TEXT PRIMARY KEY,
+      rideable_type       TEXT,
+      started_at          TIMESTAMP,
+      ended_at            TIMESTAMP,
+      start_station_name  TEXT,
+      start_station_id    TEXT,
+      end_station_name    TEXT,
+      end_station_id      TEXT,
+      member_casual       TEXT
+  );
+"
+DBI::dbExecute(con, create_apr_table)
+
+# Write to PostgreSQL (replaces table if exists)
+dbWriteTable(
+  conn      = con,
+  name      = DBI::Id(schema = "divvy", table = "april"),
+  value     = divvy_data$april,
+  overwrite = TRUE,   # drop & recreate table
+  row.names = FALSE
+)
+```
+
+#### May table
+Create and load data for the month of January
+```{r january_table, message=FALSE}
+# Create table
+create_jan_table <- "
+  CREATE TABLE divvy.january (
+      ride_id             TEXT PRIMARY KEY,
+      rideable_type       TEXT,
+      started_at          TIMESTAMP,
+      ended_at            TIMESTAMP,
+      start_station_name  TEXT,
+      start_station_id    TEXT,
+      end_station_name    TEXT,
+      end_station_id      TEXT,
+      member_casual       TEXT
+  );
+"
+DBI::dbExecute(con, create_jan_table)
+
+# Write to PostgreSQL (replaces table if exists)
+dbWriteTable(
+  conn      = con,
+  name      = DBI::Id(schema = "divvy", table = "january"),
+  value     = divvy_data$january,
+  overwrite = TRUE,   # drop & recreate table
+  row.names = FALSE
+)
+```
+
+#### June table
+Create and load data for the month of June
+```{r jun_table, message=FALSE}
+# Create table
+create_feb_table <- "
+  CREATE TABLE divvy.june (
+      ride_id             TEXT PRIMARY KEY,
+      rideable_type       TEXT,
+      started_at          TIMESTAMP,
+      ended_at            TIMESTAMP,
+      start_station_name  TEXT,
+      start_station_id    TEXT,
+      end_station_name    TEXT,
+      end_station_id      TEXT,
+      member_casual       TEXT
+  );
+"
+DBI::dbExecute(con, create_jun_table)
+
+# Write to PostgreSQL (replaces table if exists)
+dbWriteTable(
+  conn      = con,
+  name      = DBI::Id(schema = "divvy", table = "june"),
+  value     = divvy_data$june,
+  overwrite = TRUE,   # drop & recreate table
+  row.names = FALSE
+)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 ### Database views
-
+```{sql}
+SELECT COUNT(*) FROM divvy.january;
+```
+```{sql}
+SELECT COUNT(*) FROM divvy.february;
+```
 
 ### Database functions
 
@@ -79,3 +318,11 @@ CREATE SCHEMA IF NOT EXISTS divvy;
 
 
 ## Conclusion
+
+
+
+
+
+```{r disconnect, include=FALSE}
+dbDisconnect(con)
+```
