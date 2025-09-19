@@ -91,7 +91,7 @@ Create database schema to the database
 CREATE SCHEMA IF NOT EXISTS divvy;
 ```
 
-### Database tables
+### Create database tables
 Read data into R environment
 ```{r read_data}
 # Define year and months
@@ -110,48 +110,7 @@ for (m in months) {
 }
 ```
 
-Drop tables if already exists
-```{r drop_monthly_tables, message=FALSE}
-# Define all month names
-months <- tolower(month.name)
-
-for (m in months) {
-  sql <- glue::glue("DROP TABLE IF EXISTS divvy.{m};")
-  DBI::dbExecute(con, sql)
-}
-```
-
-#### January table
-Create and load data for the month of January
-```{r jan_table, message=FALSE}
-# Create table
-create_jan_table <- "
-  CREATE TABLE divvy.january (
-      ride_id             TEXT PRIMARY KEY,
-      rideable_type       TEXT,
-      started_at          TIMESTAMP,
-      ended_at            TIMESTAMP,
-      start_station_name  TEXT,
-      start_station_id    TEXT,
-      end_station_name    TEXT,
-      end_station_id      TEXT,
-      member_casual       TEXT
-  );
-"
-DBI::dbExecute(con, create_jan_table)
-
-# Write to PostgreSQL (replaces table if exists)
-dbWriteTable(
-  conn      = con,
-  name      = DBI::Id(schema = "divvy", table = "january"),
-  value     = divvy_data$january,
-  overwrite = TRUE,   # drop & recreate table
-  row.names = FALSE
-)
-```
-
-#### February table
-Create and load data for the month of February
+Create tables and load data for every month
 ```{r}
 # Months we want to load
 months <- names(divvy_data)   # "january", "february", ... "december"
@@ -185,29 +144,62 @@ for (month_name in months) {
     overwrite = TRUE,   # ensures table is replaced if already exists
     row.names = FALSE
   )
-  
 }
 ```
 
+### Combine Tables
+Combine all 12 tables into single table
+```{r}
+# Drop if already exists, then create fresh table
+dbExecute(con, glue("DROP TABLE IF EXISTS divvy.all_trips;"))
 
+all_trips_query <- paste0(
+  "CREATE TABLE IF NOT EXISTS divvy.all_trips AS\n",
+  paste(
+    sprintf("SELECT * FROM divvy.%s", months),
+    collapse = "\nUNION ALL\n"
+  )
+)
+dbExecute(con, all_trips_query)
+```
 
-
-
-
-
-
-
-
+### Database index
+```{sql}
+CREATE INDEX idx_all_trips_started_at ON divvy.all_trips(started_at);
+CREATE INDEX idx_all_trips_member_casual ON divvy.all_trips(member_casual);
+CREATE INDEX idx_all_trips_station_start ON divvy.all_trips(station_start);
+```
 
 
 ### Database views
+#### Create a master view
+```{r}
+# Drop if already exists, then create fresh table
+dbExecute(con, glue("DROP VIEW IF EXISTS divvy.all_trips_view;"))
+
+all_trips_view_query <- paste0(
+  "CREATE VIEW IF NOT EXISTS divvy.all_trips_view AS\n",
+  paste(
+    sprintf("SELECT * FROM divvy.%s", months),
+    collapse = "\nUNION ALL\n"
+  )
+)
+dbExecute(con, all_trips_view_query)
+```
+
+#### User type split
+
+
+
 ```{sql}
-SELECT COUNT(*) FROM divvy.january;
+SELECT COUNT(*) FROM divvy.all_trips;
 ```
 ```{sql}
 SELECT COUNT(*) FROM divvy.february;
 ```
-
+```{sql}
+SELECT COUNT(*) FROM divvy.may;
+```
 ```{sql}
 SELECT COUNT(*) FROM divvy.june;
 ```
@@ -224,9 +216,22 @@ SELECT COUNT(*) FROM divvy.december;
 
 ## Exploratory Data Analysis
 
+### Data Quality Checks
+* **Missing values:** Are there trips without start_station_name, end_station_name, or rideable_type?
+* **Data consistency:** Check if all timestamps are valid, trip durations are positive, and station IDs/names are consistent across months.
+* **Duplicate rides:** Validate ride_id uniqueness.
+
+### Trip Duration Analysis
+* Distribution of ride durations (histograms, boxplots) for casual vs. member users.
+* Summary statistics (mean, median, 90th percentile) per group.
+* Outlier detection (extremely short <1 min or long >24 hrs rides).
+
 
 
 ## Conclusion
+
+
+
 
 
 
